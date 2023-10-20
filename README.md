@@ -8,7 +8,7 @@ and learns to produce Shakespeare-like text. Here's 10k tokens (characters).
 It's not Hamlet, but warms my hearth.
 
 ```bash
-// NVIDIA GTX 1950 Mobile
+// NVIDIA GTX 1050 Mobile
 // Intel(R) Core(TM) i7-7700HQ CPU @ 2.80GHz
 step 0: train loss 4.2948, val loss 4.3013
 step 500: train loss 1.7599, val loss 1.9029
