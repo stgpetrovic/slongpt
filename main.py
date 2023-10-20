@@ -11,6 +11,7 @@ eval_interval = 300
 lr = 1e-2
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
+n_embd = 32
 
 torch.manual_seed(1337)
 
@@ -22,6 +23,10 @@ def ReadInput(f):
 def ValidateTokenizer(tknz):
   print(tknz)
   assert tknz.decode(tknz.encode("slon")) == "slon"
+
+text = ReadInput('input/input.txt')
+tknz = Tokenizer(text)
+ValidateTokenizer(tknz)
 
 
 def Split(data, ratio):
@@ -36,14 +41,46 @@ def GetBatch(data, split):
     x, y = x.to(device), y.to(device)
     return x, y
 
+class Head(nn.Module):
+    """One head of egotism, aka, self-attention."""
+
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(n_embd, head_size, bias=False)
+        self.query = nn.Linear(n_embd, head_size, bias=False)
+        self.value = nn.Linear(n_embd, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+
+    def forward(self, x):
+        B, T, C = x.shape
+        q = self.query(x) # BTC
+        k = self.key(x)   # BTC
+        w = q @ k.transpose(-2, -1) * C**-.5 # BTC @ BCT => BTT
+        w = w.masked_fill(self.tril[:T,:T] == 0, float('-inf')) #BTT
+        w = F.softmax(w, dim=-1) # BTT
+        v = self.value(x) # BTC
+        out = w @ v # BTT @ BTC => BTC
+        return out
+
+
 class BigramLanguageModel(nn.Module):
 
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(len(tknz), n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.sa_head = Head(n_embd)
+        self.lm_head = nn.Linear(n_embd, len(tknz))
 
     def forward(self, idx, targets=None):
-        logits = self.token_embedding_table(idx) #BTC
+        B, T = idx.shape
+
+        tok_emb = self.token_embedding_table(idx) #BTC
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # T C
+        x = tok_emb + pos_emb # BTC
+        x = self.sa_head(x) #BTC
+        logits = self.lm_head(x)  #B T vocab_size
+
         if targets is None:
             loss = None
         else:
@@ -56,7 +93,7 @@ class BigramLanguageModel(nn.Module):
     def generate(self, idx, max_new_tokens):
         # idx is B,T array of indices in context
         for _ in range(max_new_tokens):
-            logits, loss = self(idx)
+            logits, loss = self(idx[:, -block_size:])
             logits = logits[:, -1, :] # drop T, get BC
             # get probabilities
             probs = F.softmax(logits, dim=-1) # BC
@@ -67,7 +104,7 @@ class BigramLanguageModel(nn.Module):
         return idx
 
 def TryBigramLM(tknz, data, xb, yb):
-    model = BigramLanguageModel(len(tknz))
+    model = BigramLanguageModel()
     m = model.to(device)
     Train(tknz, model, data, 'train')
 
@@ -106,9 +143,6 @@ def Train(tknz, model, data, split):
  print(tknz.decode(model.generate(context, max_new_tokens=500)[0].tolist()))
 
 def Main():
-    text = ReadInput('input/input.txt')
-    tknz = Tokenizer(text)
-    ValidateTokenizer(tknz)
 
     data = torch.tensor(tknz.encode(text), dtype=torch.long)
 
